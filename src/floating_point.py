@@ -7,15 +7,18 @@
 import numpy as np
 import torch
 import random
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 import matplotlib.pyplot as plt
 import seaborn as sns
+import time
 
-# 导入字体配置
+# 导入字体配置和设备管理
 try:
     from .font_config import setup_chinese_fonts
+    from .device_manager import get_device, device_manager
 except ImportError:
     from font_config import setup_chinese_fonts
+    from device_manager import get_device, device_manager
 
 # 设置中文字体
 setup_chinese_fonts()
@@ -23,8 +26,24 @@ setup_chinese_fonts()
 class FloatingPointDemo:
     """浮点数非结合性演示类"""
     
-    def __init__(self):
+    def __init__(self, device: str = 'auto'):
+        """
+        初始化浮点数演示
+        
+        Args:
+            device: 计算设备 ('cpu', 'cuda', 'mps', 'auto')
+        """
+        if device == 'auto':
+            self.device = get_device()
+        else:
+            self.device = get_device(device)
+        
         self.results = []
+        self.device_info = device_manager.get_memory_info(self.device.type)
+        
+        print(f"使用设备: {self.device}")
+        if self.device.type == 'mps':
+            print("使用Apple Silicon MPS加速")
     
     def demonstrate_non_associativity(self) -> None:
         """演示浮点数的非结合性"""
@@ -171,6 +190,164 @@ class FloatingPointDemo:
         self.visualize_sum_distribution('experiments/plots/floating_point_demo.png')
         
         print("\n浮点数非结合性演示完成！")
+    
+    def multi_dimensional_analysis(self, dimensions: List[int] = [64, 128, 256, 512, 1024]) -> Dict[str, Any]:
+        """多维度分析浮点数非结合性"""
+        print("=== 多维度浮点数非结合性分析 ===")
+        
+        results = {}
+        
+        for dim in dimensions:
+            print(f"测试维度: {dim}x{dim}")
+            
+            # 创建测试矩阵
+            a = torch.randn(dim, dim, device=self.device, dtype=torch.float32)
+            b = torch.randn(dim, dim, device=self.device, dtype=torch.float32)
+            c = torch.randn(dim, dim, device=self.device, dtype=torch.float32)
+            
+            # 测试不同的计算顺序
+            start_time = time.time()
+            
+            # 顺序1: (A + B) + C
+            result1 = (a + b) + c
+            
+            # 顺序2: A + (B + C)
+            result2 = a + (b + c)
+            
+            # 同步设备
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            elif self.device.type == 'mps':
+                torch.mps.synchronize()
+            
+            end_time = time.time()
+            
+            # 计算差异
+            difference = torch.abs(result1 - result2)
+            max_diff = torch.max(difference).item()
+            mean_diff = torch.mean(difference).item()
+            std_diff = torch.std(difference).item()
+            
+            results[dim] = {
+                'max_difference': max_diff,
+                'mean_difference': mean_diff,
+                'std_difference': std_diff,
+                'computation_time': end_time - start_time,
+                'matrix_size': dim * dim
+            }
+            
+            print(f"  最大差异: {max_diff:.2e}")
+            print(f"  平均差异: {mean_diff:.2e}")
+            print(f"  计算时间: {(end_time - start_time)*1000:.2f}ms")
+        
+        return results
+    
+    def precision_analysis(self, precision_levels: List[str] = ['float32', 'float64']) -> Dict[str, Any]:
+        """精度分析"""
+        print("=== 精度分析 ===")
+        
+        results = {}
+        dim = 256
+        
+        for precision in precision_levels:
+            print(f"测试精度: {precision}")
+            
+            # MPS不支持float64，需要回退到CPU
+            if precision == 'float64' and self.device.type == 'mps':
+                print("  MPS不支持float64，使用CPU进行测试")
+                device = torch.device('cpu')
+            else:
+                device = self.device
+            
+            dtype = torch.float32 if precision == 'float32' else torch.float64
+            
+            # 创建测试数据
+            a = torch.randn(dim, dim, device=device, dtype=dtype)
+            b = torch.randn(dim, dim, device=device, dtype=dtype)
+            c = torch.randn(dim, dim, device=device, dtype=dtype)
+            
+            # 测试非结合性
+            result1 = (a + b) + c
+            result2 = a + (b + c)
+            
+            difference = torch.abs(result1 - result2)
+            max_diff = torch.max(difference).item()
+            mean_diff = torch.mean(difference).item()
+            
+            results[precision] = {
+                'max_difference': max_diff,
+                'mean_difference': mean_diff,
+                'dtype': dtype
+            }
+            
+            print(f"  最大差异: {max_diff:.2e}")
+            print(f"  平均差异: {mean_diff:.2e}")
+        
+        return results
+    
+    def device_comparison(self) -> Dict[str, Any]:
+        """设备性能对比"""
+        print("=== 设备性能对比 ===")
+        
+        # 获取所有可用设备
+        available_devices = ['cpu']
+        if torch.cuda.is_available():
+            available_devices.append('cuda')
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            available_devices.append('mps')
+        
+        results = {}
+        dim = 512
+        
+        for device_name in available_devices:
+            print(f"测试设备: {device_name}")
+            
+            device = get_device(device_name)
+            
+            # 创建测试数据
+            a = torch.randn(dim, dim, device=device, dtype=torch.float32)
+            b = torch.randn(dim, dim, device=device, dtype=torch.float32)
+            c = torch.randn(dim, dim, device=device, dtype=torch.float32)
+            
+            # 预热
+            for _ in range(5):
+                _ = (a + b) + c
+            
+            # 同步设备
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            elif device.type == 'mps':
+                torch.mps.synchronize()
+            
+            # 性能测试
+            start_time = time.time()
+            for _ in range(10):
+                result1 = (a + b) + c
+                result2 = a + (b + c)
+            end_time = time.time()
+            
+            # 同步设备
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            elif device.type == 'mps':
+                torch.mps.synchronize()
+            
+            avg_time = (end_time - start_time) / 10
+            
+            # 计算差异
+            difference = torch.abs(result1 - result2)
+            max_diff = torch.max(difference).item()
+            
+            results[device_name] = {
+                'avg_time_ms': avg_time * 1000,
+                'max_difference': max_diff,
+                'device': device_name
+            }
+            
+            print(f"  平均时间: {avg_time*1000:.2f}ms")
+            print(f"  最大差异: {max_diff:.2e}")
+        
+        return results
 
 def create_floating_point_examples() -> List[Tuple[str, float, float]]:
     """创建更多浮点数非结合性示例"""

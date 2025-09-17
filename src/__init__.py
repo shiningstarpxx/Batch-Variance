@@ -11,7 +11,9 @@ __author__ = "复现项目"
 from .font_config import setup_chinese_fonts
 setup_chinese_fonts()
 
+from .device_manager import *
 from .floating_point import *
 from .attention import *
 from .batch_invariant import *
 from .visualization import *
+from .advanced_analysis import *

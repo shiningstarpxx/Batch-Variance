@@ -10,15 +10,17 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Any
 import time
 import random
 
-# 导入字体配置
+# 导入字体配置和设备管理
 try:
     from .font_config import setup_chinese_fonts
+    from .device_manager import get_device, device_manager
 except ImportError:
     from font_config import setup_chinese_fonts
+    from device_manager import get_device, device_manager
 
 # 设置中文字体
 setup_chinese_fonts()
@@ -26,9 +28,24 @@ setup_chinese_fonts()
 class AttentionNondeterminismDemo:
     """注意力机制非确定性演示类"""
     
-    def __init__(self, device='cpu'):
-        self.device = device
+    def __init__(self, device='auto'):
+        """
+        初始化注意力机制演示
+        
+        Args:
+            device: 计算设备 ('cpu', 'cuda', 'mps', 'auto')
+        """
+        if device == 'auto':
+            self.device = get_device()
+        else:
+            self.device = get_device(device)
+        
         self.results = {}
+        self.device_info = device_manager.get_memory_info(self.device.type)
+        
+        print(f"注意力机制使用设备: {self.device}")
+        if self.device.type == 'mps':
+            print("使用Apple Silicon MPS加速")
     
     def create_attention_inputs(self, batch_size: int, seq_len: int, hidden_dim: int, 
                               num_heads: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
