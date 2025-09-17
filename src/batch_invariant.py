@@ -14,11 +14,13 @@ from typing import Tuple, List, Dict, Optional
 import time
 import random
 
-# 导入字体配置
+# 导入字体配置和设备管理
 try:
     from .font_config import setup_chinese_fonts
+    from .device_manager import get_device
 except ImportError:
     from font_config import setup_chinese_fonts
+    from device_manager import get_device
 
 # 设置中文字体
 setup_chinese_fonts()
@@ -134,10 +136,24 @@ class BatchInvariantOps:
 class BatchInvariantDemo:
     """批处理不变性演示类"""
     
-    def __init__(self, device='cpu'):
-        self.device = device
-        self.ops = BatchInvariantOps(device)
+    def __init__(self, device='auto'):
+        """
+        初始化批处理不变性演示
+        
+        Args:
+            device: 计算设备 ('cpu', 'cuda', 'mps', 'auto')
+        """
+        if device == 'auto':
+            self.device = get_device()
+        else:
+            self.device = get_device(device)
+        
+        self.ops = BatchInvariantOps(self.device)
         self.results = {}
+        
+        print(f"批处理不变性使用设备: {self.device}")
+        if self.device.type == 'mps':
+            print("使用Apple Silicon MPS加速")
     
     def demonstrate_batch_invariance(self, seq_lengths: List[int] = [64, 128, 256, 512, 1024],
                                    hidden_dim: int = 512, num_heads: int = 8) -> Dict[str, List[float]]:
