@@ -54,7 +54,7 @@ class DeviceManager:
     
     def get_device(self, device: Optional[str] = None) -> torch.device:
         """获取计算设备"""
-        if device is None:
+        if device is None or device == 'auto':
             device = self.optimal_device
         
         if device == 'cuda' and not self.device_info['cuda_available']:
