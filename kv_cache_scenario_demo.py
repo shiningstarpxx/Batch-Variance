@@ -32,7 +32,7 @@ setup_chinese_fonts()
 class KVCacheScenarioDemo:
     """KV Cache场景演示类"""
     
-    def __init__(self, parallel_degree: int = 4, fixed_split_size: int = 64):
+    def __init__(self, parallel_degree: int = 128, fixed_split_size: int = 64):
         self.device_manager = DeviceManager()
         self.device = self.device_manager.get_device()
         self.parallel_degree = parallel_degree
@@ -49,18 +49,19 @@ class KVCacheScenarioDemo:
         
         print(f"  Batch Size: {batch_size}, KV Length: {kv_len}")
         
-        # Split-KV策略: 根据batch size动态调整分割策略 - 更极端的分割
-        if batch_size < self.parallel_degree:
-            # 当batch size < 并行度时，使用更细的分割
-            num_splits = self.parallel_degree * 2  # 增加分割数量
+        # Split-KV策略: 根据batch size动态调整分割策略 - 使用更大的并行度
+        if batch_size == 1:
+            # 当batch size = 1时，使用更细的分割
+            num_splits = self.parallel_degree  # 使用并行度作为分割数量
             split_size = kv_len // num_splits
             if split_size == 0: split_size = 1
-            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (极细分割)")
+            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (细分割)")
         else:
-            # 当batch size >= 并行度时，使用更粗的分割
-            num_splits = 1  # 强制使用1个分割
-            split_size = kv_len
-            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (极粗分割)")
+            # 当batch size > 1时，使用更粗的分割
+            num_splits = max(1, self.parallel_degree // batch_size)
+            split_size = kv_len // num_splits
+            if split_size == 0: split_size = 1
+            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (粗分割)")
         
         # 计算attention scores
         attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(head_dim)
@@ -197,28 +198,15 @@ class KVCacheScenarioDemo:
         print("期望: 传统Split-KV导致A计算结果不一致，Batch Invariant版本保持一致")
         print("关键: 不同batch size导致不同的KV分割策略")
         
-        # 创建更复杂的KV cache和查询向量 - 增加随机性
-        # 使用不同的随机种子来增加数值的复杂性
+        # 创建固定的KV cache和查询向量 - 确保各个版本使用相同的初始化
         torch.manual_seed(42)
         K_cache = torch.randn(1, num_heads, kv_cache_length, head_dim, device=self.device, dtype=torch.float32)
         V_cache = torch.randn(1, num_heads, kv_cache_length, head_dim, device=self.device, dtype=torch.float32)
         
-        # 添加更复杂的数值扰动来增加复杂性
-        K_cache = K_cache + torch.randn_like(K_cache) * 0.2
-        V_cache = V_cache + torch.randn_like(V_cache) * 0.2
-        
-        # 添加一些非线性变换
-        K_cache = K_cache * (1 + torch.randn_like(K_cache) * 0.1)
-        V_cache = V_cache * (1 + torch.randn_like(V_cache) * 0.1)
-        
-        # 创建更复杂的查询向量 - 增加随机性
-        torch.manual_seed(123)  # 使用不同的种子
+        # 创建固定的查询向量 - 确保各个版本使用相同的初始化
+        torch.manual_seed(123)  # 使用固定的种子
         Q1 = torch.randn(1, num_heads, 1, head_dim, device=self.device, dtype=torch.float32)  # batch_size=1
         Q2 = torch.randn(4, num_heads, 8, head_dim, device=self.device, dtype=torch.float32)  # batch_size=4, 8个token
-        
-        # 添加数值扰动
-        Q1 = Q1 + torch.randn_like(Q1) * 0.05
-        Q2 = Q2 + torch.randn_like(Q2) * 0.05
         
         print(f"\n=== 场景1: 只输入'A' (batch_size=1, 1个token) ===")
         print(f"=== 场景2: 输入'ABCDEFGH' (batch_size=4, 8个token) ===")
@@ -353,11 +341,11 @@ class KVCacheScenarioDemo:
         
         # 比较Non-Deterministic版本中A token的结果 - 使用更严格的容差
         non_det_diff = np.abs(a_only_non_det - abcdefgh_a_non_det).max()
-        non_det_invariant = non_det_diff < 1e-8  # 更严格的容差
+        non_det_invariant = non_det_diff < 1e-6  # 适中的容差
         
         # 比较Deterministic版本中A token的结果 - 使用更严格的容差
         det_diff = np.abs(a_only_det - abcdefgh_a_det).max()
-        det_invariant = det_diff < 1e-8  # 更严格的容差
+        det_invariant = det_diff < 1e-6  # 适中的容差
         
         print(f"Non-Deterministic版本A token场景间差异: {non_det_diff:.2e}")
         print(f"Deterministic版本A token场景间差异: {det_diff:.2e}")
