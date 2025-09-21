@@ -574,97 +574,67 @@ class AttentionBatchInvarianceDemo:
         num_trials = len(results['non_deterministic_results'][1]['outputs'])
         
         # 创建两个主要对比图
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
         
-        # 1. Non-Deterministic (Batch Variant) 版本 - 统计信息对比
-        ax1.set_title(f'Non-Deterministic (Batch Variant) 版本\n相同输入在不同Batch Size下的输出统计 (实验次数: {num_trials})', 
+        # 1. Non-Deterministic (Batch Variant) 版本 - 每次实验的输出值
+        ax1.set_title(f'Non-Deterministic (Batch Variant) 版本\n相同输入在不同Batch Size下的每次实验输出值 (实验次数: {num_trials})', 
                      fontsize=14, fontweight='bold')
         
-        # 收集统计数据
-        batch_labels = []
-        min_values = []
-        mean_values = []
-        max_values = []
+        # 收集每次实验的输出值
+        trial_numbers = list(range(1, num_trials + 1))
+        colors = ['red', 'green', 'blue']
         
-        for batch_size in batch_sizes:
+        for i, batch_size in enumerate(batch_sizes):
             outputs = results['non_deterministic_results'][batch_size]['outputs']
             values = [output[0, 0, 0, 0] for output in outputs]
             
-            batch_labels.append(f'Batch {batch_size}')
-            min_values.append(min(values))
-            mean_values.append(np.mean(values))
-            max_values.append(max(values))
+            # 绘制每次实验的输出值
+            ax1.plot(trial_numbers, values, 'o-', label=f'Batch Size {batch_size}', 
+                    color=colors[i], linewidth=2, markersize=6, alpha=0.8)
+            
+            # 添加数值标签（只显示前5次）
+            for j, value in enumerate(values[:5]):
+                ax1.annotate(f'{value:.8f}', (trial_numbers[j], value), 
+                           textcoords="offset points", xytext=(0,10), ha='center', 
+                           fontsize=8, alpha=0.7)
         
-        # 绘制统计信息
-        x = np.arange(len(batch_labels))
-        width = 0.25
-        
-        bars1 = ax1.bar(x - width, min_values, width, label='最小值', alpha=0.8, color='lightcoral')
-        bars2 = ax1.bar(x, mean_values, width, label='平均值', alpha=0.8, color='steelblue')
-        bars3 = ax1.bar(x + width, max_values, width, label='最大值', alpha=0.8, color='lightgreen')
-        
-        # 添加数值标签
-        for bars, values in [(bars1, min_values), (bars2, mean_values), (bars3, max_values)]:
-            for bar, value in zip(bars, values):
-                height = bar.get_height()
-                ax1.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
-                        f'{value:.8f}', ha='center', va='bottom', fontsize=9, rotation=45)
-        
-        ax1.set_xlabel('Batch Size', fontsize=12)
+        ax1.set_xlabel('实验次数', fontsize=12)
         ax1.set_ylabel('输出值', fontsize=12)
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(batch_labels)
+        ax1.set_xticks(trial_numbers)
         ax1.legend(fontsize=12)
         ax1.grid(True, alpha=0.3)
         
-        # 2. Deterministic (Batch Invariant) 版本 - 统计信息对比
-        ax2.set_title(f'Deterministic (Batch Invariant) 版本\n相同输入在不同Batch Size下的输出统计 (实验次数: {num_trials})', 
+        # 2. Deterministic (Batch Invariant) 版本 - 每次实验的输出值
+        ax2.set_title(f'Deterministic (Batch Invariant) 版本\n相同输入在不同Batch Size下的每次实验输出值 (实验次数: {num_trials})', 
                      fontsize=14, fontweight='bold')
         
-        # 收集统计数据
-        batch_labels = []
-        min_values = []
-        mean_values = []
-        max_values = []
-        
-        for batch_size in batch_sizes:
+        for i, batch_size in enumerate(batch_sizes):
             outputs = results['deterministic_results'][batch_size]['outputs']
             values = [output[0, 0, 0, 0] for output in outputs]
             
-            batch_labels.append(f'Batch {batch_size}')
-            min_values.append(min(values))
-            mean_values.append(np.mean(values))
-            max_values.append(max(values))
+            # 绘制每次实验的输出值
+            ax2.plot(trial_numbers, values, 'o-', label=f'Batch Size {batch_size}', 
+                    color=colors[i], linewidth=2, markersize=6, alpha=0.8)
+            
+            # 添加数值标签（只显示前5次）
+            for j, value in enumerate(values[:5]):
+                ax2.annotate(f'{value:.8f}', (trial_numbers[j], value), 
+                           textcoords="offset points", xytext=(0,10), ha='center', 
+                           fontsize=8, alpha=0.7)
         
-        # 绘制统计信息
-        x = np.arange(len(batch_labels))
-        width = 0.25
-        
-        bars1 = ax2.bar(x - width, min_values, width, label='最小值', alpha=0.8, color='lightcoral')
-        bars2 = ax2.bar(x, mean_values, width, label='平均值', alpha=0.8, color='steelblue')
-        bars3 = ax2.bar(x + width, max_values, width, label='最大值', alpha=0.8, color='lightgreen')
-        
-        # 添加数值标签
-        for bars, values in [(bars1, min_values), (bars2, mean_values), (bars3, max_values)]:
-            for bar, value in zip(bars, values):
-                height = bar.get_height()
-                ax2.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
-                        f'{value:.8f}', ha='center', va='bottom', fontsize=9, rotation=45)
-        
-        ax2.set_xlabel('Batch Size', fontsize=12)
+        ax2.set_xlabel('实验次数', fontsize=12)
         ax2.set_ylabel('输出值', fontsize=12)
-        ax2.set_xticks(x)
-        ax2.set_xticklabels(batch_labels)
+        ax2.set_xticks(trial_numbers)
         ax2.legend(fontsize=12)
         ax2.grid(True, alpha=0.3)
         
         # 添加整体标题和说明
-        fig.suptitle('Attention Batch Invariance验证结果对比\n相同输入Token序列在不同Batch Size下的输出统计', 
+        fig.suptitle('Attention Batch Invariance验证结果对比\n相同输入Token序列在不同Batch Size下的每次实验输出值', 
                     fontsize=16, fontweight='bold', y=0.95)
         
         # 添加说明文字
         fig.text(0.5, 0.02, 
-                f'关键发现: Non-Deterministic版本在不同Batch Size下产生不同输出统计，而Deterministic版本保持一致\n'
+                f'关键发现: Non-Deterministic版本在不同Batch Size下产生不同输出值，而Deterministic版本保持一致\n'
                 f'实验配置: 并行度=4, 固定分割大小=64, 每个Batch Size进行{num_trials}次实验', 
                 ha='center', fontsize=11, style='italic',
                 bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
