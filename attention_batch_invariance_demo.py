@@ -574,82 +574,97 @@ class AttentionBatchInvarianceDemo:
         num_trials = len(results['non_deterministic_results'][1]['outputs'])
         
         # 创建两个主要对比图
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
         
-        # 1. Non-Deterministic (Batch Variant) 版本
-        ax1.set_title(f'Non-Deterministic (Batch Variant) 版本\n相同输入在不同Batch Size下的输出分布 (实验次数: {num_trials})', 
+        # 1. Non-Deterministic (Batch Variant) 版本 - 统计信息对比
+        ax1.set_title(f'Non-Deterministic (Batch Variant) 版本\n相同输入在不同Batch Size下的输出统计 (实验次数: {num_trials})', 
                      fontsize=14, fontweight='bold')
         
-        colors = ['red', 'green', 'blue']
-        for i, batch_size in enumerate(batch_sizes):
-            # 获取该batch size下的所有输出值（第一个样本的第一个元素）
+        # 收集统计数据
+        batch_labels = []
+        min_values = []
+        mean_values = []
+        max_values = []
+        
+        for batch_size in batch_sizes:
             outputs = results['non_deterministic_results'][batch_size]['outputs']
             values = [output[0, 0, 0, 0] for output in outputs]
             
-            # 检查数据范围，动态调整bins
-            data_range = max(values) - min(values)
-            if data_range < 1e-10:
-                bins = 5
-            else:
-                bins = min(20, len(set(values)))
-            
-            # 绘制直方图
-            ax1.hist(values, bins=bins, alpha=0.6, label=f'Batch Size {batch_size}', 
-                    color=colors[i], density=True)
-            
-            # 添加统计信息
-            mean_val = np.mean(values)
-            std_val = np.std(values)
-            ax1.axvline(mean_val, color=colors[i], linestyle='--', linewidth=2, alpha=0.8)
-            ax1.text(0.02, 0.98 - i*0.1, f'Batch {batch_size}: μ={mean_val:.8f}, σ={std_val:.2e}', 
-                    transform=ax1.transAxes, fontsize=10, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor=colors[i], alpha=0.3))
+            batch_labels.append(f'Batch {batch_size}')
+            min_values.append(min(values))
+            mean_values.append(np.mean(values))
+            max_values.append(max(values))
         
-        ax1.set_xlabel('输出值', fontsize=12)
-        ax1.set_ylabel('概率密度', fontsize=12)
+        # 绘制统计信息
+        x = np.arange(len(batch_labels))
+        width = 0.25
+        
+        bars1 = ax1.bar(x - width, min_values, width, label='最小值', alpha=0.8, color='lightcoral')
+        bars2 = ax1.bar(x, mean_values, width, label='平均值', alpha=0.8, color='steelblue')
+        bars3 = ax1.bar(x + width, max_values, width, label='最大值', alpha=0.8, color='lightgreen')
+        
+        # 添加数值标签
+        for bars, values in [(bars1, min_values), (bars2, mean_values), (bars3, max_values)]:
+            for bar, value in zip(bars, values):
+                height = bar.get_height()
+                ax1.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                        f'{value:.8f}', ha='center', va='bottom', fontsize=9, rotation=45)
+        
+        ax1.set_xlabel('Batch Size', fontsize=12)
+        ax1.set_ylabel('输出值', fontsize=12)
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(batch_labels)
         ax1.legend(fontsize=12)
         ax1.grid(True, alpha=0.3)
         
-        # 2. Deterministic (Batch Invariant) 版本
-        ax2.set_title(f'Deterministic (Batch Invariant) 版本\n相同输入在不同Batch Size下的输出分布 (实验次数: {num_trials})', 
+        # 2. Deterministic (Batch Invariant) 版本 - 统计信息对比
+        ax2.set_title(f'Deterministic (Batch Invariant) 版本\n相同输入在不同Batch Size下的输出统计 (实验次数: {num_trials})', 
                      fontsize=14, fontweight='bold')
         
-        for i, batch_size in enumerate(batch_sizes):
-            # 获取该batch size下的所有输出值（第一个样本的第一个元素）
+        # 收集统计数据
+        batch_labels = []
+        min_values = []
+        mean_values = []
+        max_values = []
+        
+        for batch_size in batch_sizes:
             outputs = results['deterministic_results'][batch_size]['outputs']
             values = [output[0, 0, 0, 0] for output in outputs]
             
-            # 检查数据范围，动态调整bins
-            data_range = max(values) - min(values)
-            if data_range < 1e-10:
-                bins = 5
-            else:
-                bins = min(20, len(set(values)))
-            
-            # 绘制直方图
-            ax2.hist(values, bins=bins, alpha=0.6, label=f'Batch Size {batch_size}', 
-                    color=colors[i], density=True)
-            
-            # 添加统计信息
-            mean_val = np.mean(values)
-            std_val = np.std(values)
-            ax2.axvline(mean_val, color=colors[i], linestyle='--', linewidth=2, alpha=0.8)
-            ax2.text(0.02, 0.98 - i*0.1, f'Batch {batch_size}: μ={mean_val:.8f}, σ={std_val:.2e}', 
-                    transform=ax2.transAxes, fontsize=10, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor=colors[i], alpha=0.3))
+            batch_labels.append(f'Batch {batch_size}')
+            min_values.append(min(values))
+            mean_values.append(np.mean(values))
+            max_values.append(max(values))
         
-        ax2.set_xlabel('输出值', fontsize=12)
-        ax2.set_ylabel('概率密度', fontsize=12)
+        # 绘制统计信息
+        x = np.arange(len(batch_labels))
+        width = 0.25
+        
+        bars1 = ax2.bar(x - width, min_values, width, label='最小值', alpha=0.8, color='lightcoral')
+        bars2 = ax2.bar(x, mean_values, width, label='平均值', alpha=0.8, color='steelblue')
+        bars3 = ax2.bar(x + width, max_values, width, label='最大值', alpha=0.8, color='lightgreen')
+        
+        # 添加数值标签
+        for bars, values in [(bars1, min_values), (bars2, mean_values), (bars3, max_values)]:
+            for bar, value in zip(bars, values):
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                        f'{value:.8f}', ha='center', va='bottom', fontsize=9, rotation=45)
+        
+        ax2.set_xlabel('Batch Size', fontsize=12)
+        ax2.set_ylabel('输出值', fontsize=12)
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(batch_labels)
         ax2.legend(fontsize=12)
         ax2.grid(True, alpha=0.3)
         
         # 添加整体标题和说明
-        fig.suptitle('Attention Batch Invariance验证结果对比\n相同输入Token序列在不同Batch Size下的输出分布', 
+        fig.suptitle('Attention Batch Invariance验证结果对比\n相同输入Token序列在不同Batch Size下的输出统计', 
                     fontsize=16, fontweight='bold', y=0.95)
         
         # 添加说明文字
         fig.text(0.5, 0.02, 
-                f'关键发现: Non-Deterministic版本在不同Batch Size下产生不同输出分布，而Deterministic版本保持一致\n'
+                f'关键发现: Non-Deterministic版本在不同Batch Size下产生不同输出统计，而Deterministic版本保持一致\n'
                 f'实验配置: 并行度=4, 固定分割大小=64, 每个Batch Size进行{num_trials}次实验', 
                 ha='center', fontsize=11, style='italic',
                 bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
@@ -674,11 +689,11 @@ class AttentionBatchInvarianceDemo:
         batch_sizes = results['batch_sizes']
         batch_invariance_results = results['batch_invariance_results']
         
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
         
-        # 1. 不同Batch Size间的输出差异对比
-        ax1.set_title(f'不同Batch Size间的输出差异对比 (实验次数: {num_trials})', 
-                     fontsize=14, fontweight='bold')
+        # 不同Batch Size间的输出差异对比
+        ax.set_title(f'不同Batch Size间的输出差异对比 (实验次数: {num_trials})', 
+                     fontsize=16, fontweight='bold')
         
         # 计算差异数据
         batch_pairs = []
@@ -704,61 +719,36 @@ class AttentionBatchInvarianceDemo:
         x = np.arange(len(batch_pairs))
         width = 0.35
         
-        bars1 = ax1.bar(x - width/2, non_det_diffs, width, label='Non-Deterministic', 
-                       alpha=0.7, color='red')
-        bars2 = ax1.bar(x + width/2, det_diffs, width, label='Deterministic', 
-                       alpha=0.7, color='blue')
+        bars1 = ax.bar(x - width/2, non_det_diffs, width, label='Non-Deterministic (Batch Variant)', 
+                       alpha=0.8, color='red')
+        bars2 = ax.bar(x + width/2, det_diffs, width, label='Deterministic (Batch Invariant)', 
+                       alpha=0.8, color='blue')
         
         # 添加数值标签
         for bar, diff in zip(bars1, non_det_diffs):
             height = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
-                    f'{diff:.2e}', ha='center', va='bottom', fontsize=10)
+            ax.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'{diff:.2e}', ha='center', va='bottom', fontsize=11, fontweight='bold')
         
         for bar, diff in zip(bars2, det_diffs):
             height = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
-                    f'{diff:.2e}', ha='center', va='bottom', fontsize=10)
+            ax.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'{diff:.2e}', ha='center', va='bottom', fontsize=11, fontweight='bold')
         
-        ax1.set_xlabel('Batch Size对比', fontsize=12)
-        ax1.set_ylabel('最大输出差异', fontsize=12)
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(batch_pairs)
-        ax1.legend(fontsize=12)
-        ax1.grid(True, alpha=0.3)
-        ax1.set_yscale('log')
-        
-        # 2. Batch Invariance一致性总结
-        ax2.set_title(f'Batch Invariance一致性总结 (实验次数: {num_trials})', 
-                     fontsize=14, fontweight='bold')
-        
-        # 获取batch invariance结果
-        non_det_batch_consistent = batch_invariance_results['non_deterministic_batch_consistent']
-        det_batch_consistent = batch_invariance_results['deterministic_batch_consistent']
-        
-        # 创建饼图
-        labels = ['通过', '失败']
-        non_det_sizes = [1 if non_det_batch_consistent else 0, 0 if non_det_batch_consistent else 1]
-        det_sizes = [1 if det_batch_consistent else 0, 0 if det_batch_consistent else 1]
-        
-        colors_pass = ['lightgreen', 'lightcoral']
-        colors_fail = ['lightcoral', 'lightgreen']
-        
-        # Non-Deterministic饼图
-        ax2.pie(non_det_sizes, labels=labels, colors=colors_pass if non_det_batch_consistent else colors_fail,
-               autopct='%1.0f%%', startangle=90, textprops={'fontsize': 12})
-        ax2.set_title('Non-Deterministic\nBatch Invariance', fontsize=12, fontweight='bold')
+        ax.set_xlabel('Batch Size对比', fontsize=14)
+        ax.set_ylabel('最大输出差异', fontsize=14)
+        ax.set_xticks(x)
+        ax.set_xticklabels(batch_pairs, fontsize=12)
+        ax.legend(fontsize=12)
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale('log')
         
         # 添加说明文字
-        result_text = "✅ 通过" if non_det_batch_consistent else "❌ 失败"
-        ax2.text(0, -1.3, f'结果: {result_text}', ha='center', fontsize=12, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-        
-        # 在右侧添加Deterministic的结果
-        ax2.text(1.2, 0.5, f'Deterministic结果:\n{"✅ 通过" if det_batch_consistent else "❌ 失败"}', 
-                ha='center', va='center', fontsize=12, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
-                transform=ax2.transAxes)
+        ax.text(0.5, 0.95, 
+                f'关键发现: Non-Deterministic版本在不同Batch Size间存在显著差异，而Deterministic版本差异更小\n'
+                f'实验配置: 并行度=4, 固定分割大小=64, 每个Batch Size进行{num_trials}次实验', 
+                transform=ax.transAxes, ha='center', va='top', fontsize=11, style='italic',
+                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
         
         plt.tight_layout()
         
