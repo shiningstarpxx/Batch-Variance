@@ -326,22 +326,45 @@ class AttentionBatchInvarianceDemo:
         return Q, K, V
     
     def test_batch_invariance(self, batch_sizes: List[int] = [1, 4, 8], num_trials: int = 10) -> Dict[str, Any]:
-        """测试batch invariance"""
+        """测试batch invariance - 使用相同的输入token序列测试不同batch size"""
         print("=" * 80)
         print("Attention Batch Invariance测试")
         print("=" * 80)
         
+        # 创建固定的输入token序列（模拟相同的输入）
+        torch.manual_seed(42)
+        num_heads = 8
+        seq_len = 1
+        kv_len = 512
+        head_dim = 64
+        
+        # 创建固定的Q, K, V（这些代表相同的输入token序列）
+        Q_fixed = torch.randn(1, num_heads, seq_len, head_dim, device=self.device, dtype=torch.float32)
+        K_fixed = torch.randn(1, num_heads, kv_len, head_dim, device=self.device, dtype=torch.float32)
+        V_fixed = torch.randn(1, num_heads, kv_len, head_dim, device=self.device, dtype=torch.float32)
+        
+        print(f"固定输入形状: Q={Q_fixed.shape}, K={K_fixed.shape}, V={V_fixed.shape}")
+        print("使用相同的输入token序列测试不同batch size下的batch invariance")
+        
         results = {
             'batch_sizes': batch_sizes,
             'non_deterministic_results': {},
-            'deterministic_results': {}
+            'deterministic_results': {},
+            'batch_invariance_results': {}
         }
+        
+        # 存储不同batch size下的输出，用于比较batch invariance
+        non_det_batch_outputs = {}
+        det_batch_outputs = {}
         
         for batch_size in batch_sizes:
             print(f"\n=== 测试Batch Size: {batch_size} ===")
             
-            # 创建测试数据
-            Q, K, V = self.create_test_attention_data(batch_size)
+            # 将固定输入复制到目标batch size
+            Q = Q_fixed.repeat(batch_size, 1, 1, 1)
+            K = K_fixed.repeat(batch_size, 1, 1, 1)
+            V = V_fixed.repeat(batch_size, 1, 1, 1)
+            
             print(f"输入形状: Q={Q.shape}, K={K.shape}, V={V.shape}")
             
             # 测试Non-Deterministic实现
@@ -412,6 +435,39 @@ class AttentionBatchInvarianceDemo:
                 'mean_output': det_mean,
                 'output_range': det_range
             }
+            
+            # 存储用于batch invariance比较的输出（取第一个样本的平均值）
+            non_det_batch_outputs[batch_size] = non_det_mean[0]  # 第一个样本
+            det_batch_outputs[batch_size] = det_mean[0]  # 第一个样本
+        
+        # 测试batch invariance
+        print(f"\n=== Batch Invariance测试 ===")
+        print("比较相同输入在不同batch size下的输出一致性")
+        
+        # 检查Non-Deterministic的batch invariance
+        non_det_batch_consistent = self._check_batch_invariance(non_det_batch_outputs)
+        print(f"Non-Deterministic Batch Invariance: {'✅ 通过' if non_det_batch_consistent else '❌ 失败'}")
+        
+        # 检查Deterministic的batch invariance
+        det_batch_consistent = self._check_batch_invariance(det_batch_outputs)
+        print(f"Deterministic Batch Invariance: {'✅ 通过' if det_batch_consistent else '❌ 失败'}")
+        
+        # 计算不同batch size间的差异
+        print(f"\n不同Batch Size间的输出差异:")
+        for i, bs1 in enumerate(batch_sizes):
+            for bs2 in batch_sizes[i+1:]:
+                non_det_diff = np.abs(non_det_batch_outputs[bs1] - non_det_batch_outputs[bs2]).max()
+                det_diff = np.abs(det_batch_outputs[bs1] - det_batch_outputs[bs2]).max()
+                print(f"  Batch {bs1} vs Batch {bs2}:")
+                print(f"    Non-Deterministic差异: {non_det_diff:.2e}")
+                print(f"    Deterministic差异: {det_diff:.2e}")
+        
+        results['batch_invariance_results'] = {
+            'non_deterministic_batch_consistent': non_det_batch_consistent,
+            'deterministic_batch_consistent': det_batch_consistent,
+            'non_deterministic_batch_outputs': non_det_batch_outputs,
+            'deterministic_batch_outputs': det_batch_outputs
+        }
         
         return results
     
@@ -423,6 +479,22 @@ class AttentionBatchInvarianceDemo:
         reference = outputs[0]
         for output in outputs[1:]:
             if not np.allclose(output, reference, atol=tolerance, rtol=tolerance):
+                return False
+        return True
+    
+    def _check_batch_invariance(self, batch_outputs: Dict[int, np.ndarray], tolerance: float = 1e-6) -> bool:
+        """检查batch invariance - 相同输入在不同batch size下是否产生相同输出"""
+        if len(batch_outputs) <= 1:
+            return True
+        
+        # 取第一个batch size的输出作为参考
+        reference_batch_size = min(batch_outputs.keys())
+        reference_output = batch_outputs[reference_batch_size]
+        
+        for batch_size, output in batch_outputs.items():
+            if batch_size == reference_batch_size:
+                continue
+            if not np.allclose(output, reference_output, atol=tolerance, rtol=tolerance):
                 return False
         return True
     
@@ -452,22 +524,31 @@ class AttentionBatchInvarianceDemo:
         # 分析关键发现
         print(f"\n=== 关键发现 ===")
         
-        # 检查batch size = 1时的行为
-        non_det_batch1 = results['non_deterministic_results'][1]['consistent']
-        det_batch1 = results['deterministic_results'][1]['consistent']
+        # 检查batch invariance结果
+        batch_invariance_results = results['batch_invariance_results']
+        non_det_batch_consistent = batch_invariance_results['non_deterministic_batch_consistent']
+        det_batch_consistent = batch_invariance_results['deterministic_batch_consistent']
         
-        print(f"Batch Size = 1时:")
-        print(f"  - Non-Deterministic实现: {'✅ 一致' if non_det_batch1 else '❌ 不一致'}")
-        print(f"  - Deterministic实现: {'✅ 一致' if det_batch1 else '❌ 不一致'}")
+        print(f"Batch Invariance测试结果:")
+        print(f"  - Non-Deterministic实现: {'✅ 通过' if non_det_batch_consistent else '❌ 失败'}")
+        print(f"  - Deterministic实现: {'✅ 通过' if det_batch_consistent else '❌ 失败'}")
         
-        if not non_det_batch1 and det_batch1:
-            print("🎉 验证成功！Non-Deterministic在batch size=1时破坏了一致性")
+        if not non_det_batch_consistent and det_batch_consistent:
+            print("🎉 验证成功！Non-Deterministic破坏了batch invariance")
             print("   Deterministic策略成功保持了batch invariance")
-        elif non_det_batch1 and det_batch1:
-            print("⚠️ 两种实现都保持一致性，但存在显著差异")
+        elif non_det_batch_consistent and det_batch_consistent:
+            print("⚠️ 两种实现都保持batch invariance，但存在显著差异")
             print("   这符合预期：不同实现策略导致不同的数值结果")
         else:
             print("❌ 结果不符合预期")
+        
+        # 检查单个batch size内的一致性
+        non_det_batch1 = results['non_deterministic_results'][1]['consistent']
+        det_batch1 = results['deterministic_results'][1]['consistent']
+        
+        print(f"\n单个Batch Size内的一致性:")
+        print(f"  - Non-Deterministic实现: {'✅ 一致' if non_det_batch1 else '❌ 不一致'}")
+        print(f"  - Deterministic实现: {'✅ 一致' if det_batch1 else '❌ 不一致'}")
         
         # 检查batch size >= 并行度时的行为
         non_det_batch4 = results['non_deterministic_results'][4]['consistent']
