@@ -228,11 +228,12 @@ class KVCacheScenarioDemo:
         # 确保场景2中第一个token (A) 的查询向量与场景1完全相同
         Q2_ABCDEFGH[:, :, 0:1, :] = Q1[:, :, 0:1, :]
         
-        # 扩展KV cache到正确的batch size
-        K_cache_1 = K_cache  # batch_size=1
-        V_cache_1 = V_cache  # batch_size=1
-        K_cache_4 = K_cache.repeat(4, 1, 1, 1)  # batch_size=4
-        V_cache_4 = V_cache.repeat(4, 1, 1, 1)  # batch_size=4
+        # 确保两个场景使用完全相同的KV cache - 关键修正
+        # 对于invariant版本，应该使用相同的KV cache，但需要匹配batch size
+        K_cache_1 = K_cache  # batch_size=1, shape: [1, 8, 1000, 64]
+        V_cache_1 = V_cache  # batch_size=1, shape: [1, 8, 1000, 64]
+        K_cache_4 = K_cache.expand(4, -1, -1, -1)  # 扩展到batch_size=4，但使用相同的数据
+        V_cache_4 = V_cache.expand(4, -1, -1, -1)  # 扩展到batch_size=4，但使用相同的数据
         
         scenarios = [
             ('A_only', Q1, K_cache_1, V_cache_1, '只输入A (batch_size=1)'),
