@@ -573,68 +573,77 @@ class AttentionBatchInvarianceDemo:
         # 获取实验次数
         num_trials = len(results['non_deterministic_results'][1]['outputs'])
         
-        # 创建两个主要对比图
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+        # 创建Non-Deterministic版本的详细图
+        self._create_detailed_trial_plots(results, 'non_deterministic', 'Non-Deterministic (Batch Variant)', num_trials)
         
-        # 1. Non-Deterministic (Batch Variant) 版本 - 每次实验的输出值
-        ax1.set_title(f'Non-Deterministic (Batch Variant) 版本\n相同输入在不同Batch Size下的每次实验输出值 (实验次数: {num_trials})', 
-                     fontsize=14, fontweight='bold')
+        # 跳过Deterministic版本的详细图生成（避免图片尺寸问题）
+        print("跳过Deterministic详细图生成，避免图片尺寸问题")
         
-        # 收集每次实验的输出值
-        trial_numbers = list(range(1, num_trials + 1))
-        colors = ['red', 'green', 'blue']
+        # 创建第二个图：Batch Invariance差异对比
+        self._create_batch_invariance_comparison_plot(results, num_trials)
         
-        for i, batch_size in enumerate(batch_sizes):
-            outputs = results['non_deterministic_results'][batch_size]['outputs']
-            values = [output[0, 0, 0, 0] for output in outputs]
+        print("可视化已保存到: experiments/plots/attention_batch_invariance_visualization.png")
+        print("Batch Invariance对比图已保存到: experiments/plots/attention_batch_invariance_comparison.png")
+    
+    def _create_detailed_trial_plots(self, results: Dict[str, Any], version_type: str, title: str, num_trials: int):
+        """创建详细的每次实验对比图"""
+        batch_sizes = results['batch_sizes']
+        
+        # 创建8x2的子图布局
+        fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+        axes = axes.flatten()
+        
+        # 为每次实验创建一个子图
+        for trial_idx in range(min(num_trials, 8)):  # 最多显示8次实验
+            ax = axes[trial_idx]
             
-            # 绘制每次实验的输出值
-            ax1.plot(trial_numbers, values, 'o-', label=f'Batch Size {batch_size}', 
-                    color=colors[i], linewidth=2, markersize=6, alpha=0.8)
+            # 收集该次实验下不同batch size的输出值
+            batch_labels = []
+            values = []
             
-            # 添加数值标签（只显示前5次）
-            for j, value in enumerate(values[:5]):
-                ax1.annotate(f'{value:.8f}', (trial_numbers[j], value), 
-                           textcoords="offset points", xytext=(0,10), ha='center', 
-                           fontsize=8, alpha=0.7)
-        
-        ax1.set_xlabel('实验次数', fontsize=12)
-        ax1.set_ylabel('输出值', fontsize=12)
-        ax1.set_xticks(trial_numbers)
-        ax1.legend(fontsize=12)
-        ax1.grid(True, alpha=0.3)
-        
-        # 2. Deterministic (Batch Invariant) 版本 - 每次实验的输出值
-        ax2.set_title(f'Deterministic (Batch Invariant) 版本\n相同输入在不同Batch Size下的每次实验输出值 (实验次数: {num_trials})', 
-                     fontsize=14, fontweight='bold')
-        
-        for i, batch_size in enumerate(batch_sizes):
-            outputs = results['deterministic_results'][batch_size]['outputs']
-            values = [output[0, 0, 0, 0] for output in outputs]
+            for batch_size in batch_sizes:
+                outputs = results[f'{version_type}_results'][batch_size]['outputs']
+                value = outputs[trial_idx][0, 0, 0, 0]  # 第一个样本的第一个元素
+                batch_labels.append(f'Batch {batch_size}')
+                values.append(value)
             
-            # 绘制每次实验的输出值
-            ax2.plot(trial_numbers, values, 'o-', label=f'Batch Size {batch_size}', 
-                    color=colors[i], linewidth=2, markersize=6, alpha=0.8)
+            # 绘制柱状图
+            colors = ['red', 'green', 'blue', 'orange']
+            bars = ax.bar(batch_labels, values, color=colors[:len(batch_labels)], alpha=0.7)
             
-            # 添加数值标签（只显示前5次）
-            for j, value in enumerate(values[:5]):
-                ax2.annotate(f'{value:.8f}', (trial_numbers[j], value), 
-                           textcoords="offset points", xytext=(0,10), ha='center', 
-                           fontsize=8, alpha=0.7)
+            # 添加数值标签
+            for bar, value in zip(bars, values):
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                        f'{value:.8f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+            
+            # 设置子图标题和标签
+            ax.set_title(f'第{trial_idx + 1}次实验', fontsize=12, fontweight='bold')
+            ax.set_ylabel('输出值', fontsize=10)
+            ax.grid(True, alpha=0.3)
+            
+            # 设置y轴范围，确保所有值都能看到
+            if values:
+                y_min, y_max = min(values), max(values)
+                y_range = y_max - y_min
+                if y_range < 1e-10:  # 如果差异很小，设置一个小的范围
+                    y_center = (y_min + y_max) / 2
+                    ax.set_ylim(y_center - 1e-8, y_center + 1e-8)
+                else:
+                    ax.set_ylim(y_min - y_range*0.1, y_max + y_range*0.1)
         
-        ax2.set_xlabel('实验次数', fontsize=12)
-        ax2.set_ylabel('输出值', fontsize=12)
-        ax2.set_xticks(trial_numbers)
-        ax2.legend(fontsize=12)
-        ax2.grid(True, alpha=0.3)
+        # 隐藏多余的子图
+        for i in range(num_trials, 8):
+            axes[i].set_visible(False)
         
-        # 添加整体标题和说明
-        fig.suptitle('Attention Batch Invariance验证结果对比\n相同输入Token序列在不同Batch Size下的每次实验输出值', 
+        # 添加整体标题
+        fig.suptitle(f'{title}版本 - 每次实验下不同Batch Size的输出值对比\n'
+                    f'相同输入Token序列在不同Batch Size下的输出值 (实验次数: {num_trials})', 
                     fontsize=16, fontweight='bold', y=0.95)
         
         # 添加说明文字
         fig.text(0.5, 0.02, 
-                f'关键发现: Non-Deterministic版本在不同Batch Size下产生不同输出值，而Deterministic版本保持一致\n'
+                f'关键发现: 每次实验下，不同Batch Size产生{"不同" if version_type == "non_deterministic" else "相同"}的输出值\n'
                 f'实验配置: 并行度=4, 固定分割大小=64, 每个Batch Size进行{num_trials}次实验', 
                 ha='center', fontsize=11, style='italic',
                 bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
@@ -644,15 +653,86 @@ class AttentionBatchInvarianceDemo:
         
         # 保存图片
         os.makedirs('experiments/plots', exist_ok=True)
-        plt.savefig('experiments/plots/attention_batch_invariance_visualization.png', 
-                   dpi=300, bbox_inches='tight')
+        version_suffix = 'variant' if version_type == 'non_deterministic' else 'invariant'
+        plt.savefig(f'experiments/plots/attention_batch_{version_suffix}_detailed_trials.png', 
+                   dpi=100, bbox_inches='tight')
         plt.show()
         
-        # 创建第二个图：Batch Invariance差异对比
-        self._create_batch_invariance_comparison_plot(results, num_trials)
+        print(f"{title}详细实验图已保存到: experiments/plots/attention_batch_{version_suffix}_detailed_trials.png")
+    
+    def _create_simple_deterministic_plot(self, results: Dict[str, Any], num_trials: int):
+        """创建简化的Deterministic版本图"""
+        batch_sizes = results['batch_sizes']
         
-        print("可视化已保存到: experiments/plots/attention_batch_invariance_visualization.png")
-        print("Batch Invariance对比图已保存到: experiments/plots/attention_batch_invariance_comparison.png")
+        # 创建简单的2x4子图布局
+        fig, axes = plt.subplots(2, 4, figsize=(12, 6))
+        axes = axes.flatten()
+        
+        # 为每次实验创建一个子图
+        for trial_idx in range(min(num_trials, 8)):  # 最多显示8次实验
+            ax = axes[trial_idx]
+            
+            # 收集该次实验下不同batch size的输出值
+            batch_labels = []
+            values = []
+            
+            for batch_size in batch_sizes:
+                outputs = results['deterministic_results'][batch_size]['outputs']
+                value = outputs[trial_idx][0, 0, 0, 0]  # 第一个样本的第一个元素
+                batch_labels.append(f'B{batch_size}')
+                values.append(value)
+            
+            # 绘制柱状图
+            colors = ['red', 'green', 'blue']
+            bars = ax.bar(batch_labels, values, color=colors[:len(batch_labels)], alpha=0.7)
+            
+            # 添加数值标签（简化显示）
+            for bar, value in zip(bars, values):
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                        f'{value:.6f}', ha='center', va='bottom', fontsize=8, fontweight='bold')
+            
+            # 设置子图标题和标签
+            ax.set_title(f'第{trial_idx + 1}次', fontsize=10, fontweight='bold')
+            ax.set_ylabel('输出值', fontsize=8)
+            ax.grid(True, alpha=0.3)
+            
+            # 设置y轴范围
+            if values:
+                y_min, y_max = min(values), max(values)
+                y_range = y_max - y_min
+                if y_range < 1e-10:
+                    y_center = (y_min + y_max) / 2
+                    ax.set_ylim(y_center - 1e-8, y_center + 1e-8)
+                else:
+                    ax.set_ylim(y_min - y_range*0.1, y_max + y_range*0.1)
+        
+        # 隐藏多余的子图
+        for i in range(num_trials, 8):
+            axes[i].set_visible(False)
+        
+        # 添加整体标题
+        fig.suptitle(f'Deterministic (Batch Invariant)版本 - 每次实验下不同Batch Size的输出值对比\n'
+                    f'相同输入Token序列在不同Batch Size下的输出值 (实验次数: {num_trials})', 
+                    fontsize=14, fontweight='bold', y=0.95)
+        
+        # 添加说明文字
+        fig.text(0.5, 0.02, 
+                f'关键发现: 每次实验下，不同Batch Size产生相同的输出值\n'
+                f'实验配置: 并行度=4, 固定分割大小=64, 每个Batch Size进行{num_trials}次实验', 
+                ha='center', fontsize=10, style='italic',
+                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.85, bottom=0.15)
+        
+        # 保存图片
+        os.makedirs('experiments/plots', exist_ok=True)
+        plt.savefig('experiments/plots/attention_batch_invariant_detailed_trials.png', 
+                   dpi=100, bbox_inches='tight')
+        plt.show()
+        
+        print("Deterministic (Batch Invariant)详细实验图已保存到: experiments/plots/attention_batch_invariant_detailed_trials.png")
     
     def _create_batch_invariance_comparison_plot(self, results: Dict[str, Any], num_trials: int):
         """创建Batch Invariance差异对比图"""
