@@ -160,18 +160,19 @@ class KVCacheScenarioDemo:
         print("场景2: 输入'ABC' (3个token)")
         print("期望: 传统Split-KV导致A计算结果不一致，Batch Invariant版本保持一致")
         
-        # 创建固定的KV cache
+        # 创建固定的KV cache和查询向量
         torch.manual_seed(42)
         K_cache = torch.randn(1, num_heads, kv_cache_length, head_dim, device=self.device, dtype=torch.float32)
         V_cache = torch.randn(1, num_heads, kv_cache_length, head_dim, device=self.device, dtype=torch.float32)
         
-        # 场景1: 只输入"A" (1个token)
-        print(f"\n=== 场景1: 只输入'A' (1个token) ===")
+        # 创建固定的查询向量
         Q1 = torch.randn(1, num_heads, 1, head_dim, device=self.device, dtype=torch.float32)
-        
-        # 场景2: 输入"ABC" (3个token)
-        print(f"=== 场景2: 输入'ABC' (3个token) ===")
         Q2 = torch.randn(1, num_heads, 3, head_dim, device=self.device, dtype=torch.float32)
+        
+        print(f"\n=== 场景1: 只输入'A' (1个token) ===")
+        print(f"=== 场景2: 输入'ABC' (3个token) ===")
+        print("注意: 使用相同的KV cache和相同的A token查询向量")
+        print("关键: 场景2中的A token查询向量与场景1完全相同")
         
         results = {
             'scenarios': ['A_only', 'ABC'],
@@ -182,9 +183,14 @@ class KVCacheScenarioDemo:
         }
         
         # 测试两个场景
+        # 关键修正: 确保场景2中的A token查询向量与场景1完全相同
+        Q2_ABC = Q2.clone()     # 场景2的完整查询向量
+        # 确保场景2中第一个token (A) 的查询向量与场景1完全相同
+        Q2_ABC[:, :, 0:1, :] = Q1[:, :, 0:1, :]
+        
         scenarios = [
             ('A_only', Q1, '只输入A'),
-            ('ABC', Q2, '输入ABC')
+            ('ABC', Q2_ABC, '输入ABC (A token查询向量与场景1相同)')
         ]
         
         for scenario_name, Q, description in scenarios:
@@ -266,34 +272,57 @@ class KVCacheScenarioDemo:
         return results
     
     def _test_scenario_invariance(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """测试场景间的一致性"""
+        """测试场景间的一致性 - 重点关注A token的计算结果"""
         print("比较两个场景中A token的输出一致性")
+        print("场景1: 只输入A → 输出就是A的结果")
+        print("场景2: 输入ABC → 输出包含A、B、C，我们只关注A的部分")
         
         # 获取两个场景的结果
+        # 场景1: 只输入A，输出就是A的结果
         a_only_non_det = results['non_deterministic_results']['A_only']['mean_output']
-        abc_non_det = results['non_deterministic_results']['ABC']['mean_output']
         a_only_det = results['deterministic_results']['A_only']['mean_output']
+        
+        # 场景2: 输入ABC，输出包含A、B、C，我们只提取A的部分（第一个token）
+        abc_non_det = results['non_deterministic_results']['ABC']['mean_output']
         abc_det = results['deterministic_results']['ABC']['mean_output']
         
-        # 比较Non-Deterministic版本
-        non_det_diff = np.abs(a_only_non_det - abc_non_det).max()
+        # 从ABC的输出中提取A的部分（第一个token）
+        abc_a_non_det = abc_non_det[:, :, 0:1, :]  # 只取第一个token (A)
+        abc_a_det = abc_det[:, :, 0:1, :]  # 只取第一个token (A)
+        
+        print(f"场景1 A token输出形状: {a_only_non_det.shape}")
+        print(f"场景2 A token输出形状: {abc_a_non_det.shape}")
+        
+        # 比较Non-Deterministic版本中A token的结果
+        non_det_diff = np.abs(a_only_non_det - abc_a_non_det).max()
         non_det_invariant = non_det_diff < 1e-6
         
-        # 比较Deterministic版本
-        det_diff = np.abs(a_only_det - abc_det).max()
+        # 比较Deterministic版本中A token的结果
+        det_diff = np.abs(a_only_det - abc_a_det).max()
         det_invariant = det_diff < 1e-6
         
-        print(f"Non-Deterministic版本场景间差异: {non_det_diff:.2e}")
-        print(f"Deterministic版本场景间差异: {det_diff:.2e}")
+        print(f"Non-Deterministic版本A token场景间差异: {non_det_diff:.2e}")
+        print(f"Deterministic版本A token场景间差异: {det_diff:.2e}")
         
-        print(f"Non-Deterministic Scenario Invariance: {'✅ 通过' if non_det_invariant else '❌ 失败'}")
-        print(f"Deterministic Scenario Invariance: {'✅ 通过' if det_invariant else '❌ 失败'}")
+        print(f"Non-Deterministic A Token Scenario Invariance: {'✅ 通过' if non_det_invariant else '❌ 失败'}")
+        print(f"Deterministic A Token Scenario Invariance: {'✅ 通过' if det_invariant else '❌ 失败'}")
+        
+        # 显示具体的A token输出值
+        print(f"\nA Token具体输出值对比:")
+        print(f"场景1 (只输入A) - Non-Det: {a_only_non_det[0, 0, 0, 0]:.10f}")
+        print(f"场景2 (输入ABC) - Non-Det: {abc_a_non_det[0, 0, 0, 0]:.10f}")
+        print(f"场景1 (只输入A) - Det: {a_only_det[0, 0, 0, 0]:.10f}")
+        print(f"场景2 (输入ABC) - Det: {abc_a_det[0, 0, 0, 0]:.10f}")
         
         return {
             'non_deterministic_invariant': non_det_invariant,
             'deterministic_invariant': det_invariant,
             'non_deterministic_diff': non_det_diff,
-            'deterministic_diff': det_diff
+            'deterministic_diff': det_diff,
+            'a_only_non_det': a_only_non_det,
+            'abc_a_non_det': abc_a_non_det,
+            'a_only_det': a_only_det,
+            'abc_a_det': abc_a_det
         }
     
     def _check_consistency(self, outputs: List[np.ndarray], tolerance: float = 1e-6) -> bool:
@@ -329,16 +358,16 @@ class KVCacheScenarioDemo:
             print("⚠️ 需要进一步调整参数以观察到预期的差异")
     
     def create_visualization(self, results: Dict[str, Any]):
-        """创建可视化"""
+        """创建可视化 - 重点关注A token的计算结果"""
         print("\n" + "=" * 80)
-        print("创建KV Cache场景可视化")
+        print("创建KV Cache场景可视化 - 重点关注A Token结果")
         print("=" * 80)
         
         # 创建场景对比图
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         
         scenarios = ['A_only', 'ABC']
-        scenario_names = ['只输入A', '输入ABC']
+        scenario_names = ['只输入A', '输入ABC (提取A部分)']
         
         # 获取实验次数
         num_trials = len(results['non_deterministic_results']['A_only']['outputs'])
@@ -347,12 +376,18 @@ class KVCacheScenarioDemo:
             # Non-Deterministic版本
             ax1 = axes[i, 0]
             outputs = results['non_deterministic_results'][scenario]['outputs']
-            values = [output[0, 0, 0, 0] for output in outputs]
+            
+            if scenario == 'A_only':
+                # 场景1: 只输入A，输出就是A的结果
+                values = [output[0, 0, 0, 0] for output in outputs]
+            else:
+                # 场景2: 输入ABC，只提取A的部分（第一个token）
+                values = [output[0, 0, 0, 0] for output in outputs]
             
             ax1.plot(range(1, num_trials + 1), values, 'o-', color='red', linewidth=2, markersize=6)
             ax1.set_title(f'Non-Deterministic版本 - {name}', fontsize=14, fontweight='bold')
             ax1.set_xlabel('实验次数', fontsize=12)
-            ax1.set_ylabel('输出值', fontsize=12)
+            ax1.set_ylabel('A Token输出值', fontsize=12)
             ax1.grid(True, alpha=0.3)
             
             # 添加数值标签（前5次）
@@ -364,12 +399,18 @@ class KVCacheScenarioDemo:
             # Deterministic版本
             ax2 = axes[i, 1]
             outputs = results['deterministic_results'][scenario]['outputs']
-            values = [output[0, 0, 0, 0] for output in outputs]
+            
+            if scenario == 'A_only':
+                # 场景1: 只输入A，输出就是A的结果
+                values = [output[0, 0, 0, 0] for output in outputs]
+            else:
+                # 场景2: 输入ABC，只提取A的部分（第一个token）
+                values = [output[0, 0, 0, 0] for output in outputs]
             
             ax2.plot(range(1, num_trials + 1), values, 'o-', color='blue', linewidth=2, markersize=6)
             ax2.set_title(f'Deterministic版本 - {name}', fontsize=14, fontweight='bold')
             ax2.set_xlabel('实验次数', fontsize=12)
-            ax2.set_ylabel('输出值', fontsize=12)
+            ax2.set_ylabel('A Token输出值', fontsize=12)
             ax2.grid(True, alpha=0.3)
             
             # 添加数值标签（前5次）
@@ -379,12 +420,12 @@ class KVCacheScenarioDemo:
                            fontsize=8, alpha=0.7)
         
         # 添加整体标题
-        fig.suptitle('KV Cache场景测试结果对比\n场景1: 只输入A vs 场景2: 输入ABC', 
+        fig.suptitle('KV Cache场景测试结果对比 - 重点关注A Token\n场景1: 只输入A vs 场景2: 输入ABC (提取A部分)', 
                     fontsize=16, fontweight='bold', y=0.95)
         
         # 添加说明文字
         fig.text(0.5, 0.02, 
-                f'关键验证: 传统Split-KV导致A在两种场景下计算结果不一致，Batch Invariant版本保持一致\n'
+                f'关键验证: 传统Split-KV导致A token在两种场景下计算结果不一致，Batch Invariant版本保持一致\n'
                 f'实验配置: KV Cache长度=1000, 并行度=4, 固定分割大小=64, 每个场景进行{num_trials}次实验', 
                 ha='center', fontsize=11, style='italic',
                 bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
@@ -399,6 +440,76 @@ class KVCacheScenarioDemo:
         plt.show()
         
         print("KV Cache场景可视化已保存到: experiments/plots/kv_cache_scenario_visualization.png")
+        
+        # 创建A Token对比图
+        self._create_a_token_comparison_plot(results)
+    
+    def _create_a_token_comparison_plot(self, results: Dict[str, Any]):
+        """创建A Token专门对比图"""
+        print("创建A Token专门对比图")
+        
+        # 获取A token的结果
+        scenario_invariance = results['scenario_invariance_results']
+        a_only_non_det = scenario_invariance['a_only_non_det']
+        abc_a_non_det = scenario_invariance['abc_a_non_det']
+        a_only_det = scenario_invariance['a_only_det']
+        abc_a_det = scenario_invariance['abc_a_det']
+        
+        # 创建对比图
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Non-Deterministic版本A Token对比
+        scenarios = ['只输入A', '输入ABC (A部分)']
+        non_det_values = [a_only_non_det[0, 0, 0, 0], abc_a_non_det[0, 0, 0, 0]]
+        
+        bars1 = ax1.bar(scenarios, non_det_values, color=['red', 'orange'], alpha=0.7)
+        ax1.set_title('Non-Deterministic版本 - A Token输出值对比', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('A Token输出值', fontsize=12)
+        ax1.grid(True, alpha=0.3)
+        
+        # 添加数值标签
+        for bar, value in zip(bars1, non_det_values):
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'{value:.10f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        # Deterministic版本A Token对比
+        det_values = [a_only_det[0, 0, 0, 0], abc_a_det[0, 0, 0, 0]]
+        
+        bars2 = ax2.bar(scenarios, det_values, color=['blue', 'lightblue'], alpha=0.7)
+        ax2.set_title('Deterministic版本 - A Token输出值对比', fontsize=14, fontweight='bold')
+        ax2.set_ylabel('A Token输出值', fontsize=12)
+        ax2.grid(True, alpha=0.3)
+        
+        # 添加数值标签
+        for bar, value in zip(bars2, det_values):
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height + height*0.01,
+                    f'{value:.10f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        # 添加整体标题
+        fig.suptitle('A Token输出值专门对比\n验证Split-KV策略对A Token计算结果的影响', 
+                    fontsize=16, fontweight='bold', y=0.95)
+        
+        # 添加说明文字
+        non_det_diff = scenario_invariance['non_deterministic_diff']
+        det_diff = scenario_invariance['deterministic_diff']
+        
+        fig.text(0.5, 0.02, 
+                f'关键发现: Non-Deterministic版本A Token差异={non_det_diff:.2e}, Deterministic版本A Token差异={det_diff:.2e}\n'
+                f'验证目标: 传统Split-KV破坏A Token的scenario invariance，Batch Invariant版本保持一致性', 
+                ha='center', fontsize=11, style='italic',
+                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+        
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.85, bottom=0.15)
+        
+        # 保存图片
+        plt.savefig('experiments/plots/a_token_comparison_visualization.png', 
+                   dpi=300, bbox_inches='tight')
+        plt.show()
+        
+        print("A Token专门对比图已保存到: experiments/plots/a_token_comparison_visualization.png")
     
     def run_analysis(self):
         """运行完整分析"""
