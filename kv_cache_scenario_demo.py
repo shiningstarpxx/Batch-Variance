@@ -49,19 +49,18 @@ class KVCacheScenarioDemo:
         
         print(f"  Batch Size: {batch_size}, KV Length: {kv_len}")
         
-        # Split-KV策略: 根据batch size动态调整分割策略
+        # Split-KV策略: 根据batch size动态调整分割策略 - 更极端的分割
         if batch_size < self.parallel_degree:
             # 当batch size < 并行度时，使用更细的分割
-            num_splits = self.parallel_degree
+            num_splits = self.parallel_degree * 2  # 增加分割数量
             split_size = kv_len // num_splits
             if split_size == 0: split_size = 1
-            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (细分割)")
+            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (极细分割)")
         else:
             # 当batch size >= 并行度时，使用更粗的分割
-            num_splits = max(1, self.parallel_degree // batch_size)
-            split_size = kv_len // num_splits
-            if split_size == 0: split_size = 1
-            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (粗分割)")
+            num_splits = 1  # 强制使用1个分割
+            split_size = kv_len
+            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (极粗分割)")
         
         # 计算attention scores
         attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(head_dim)
@@ -106,21 +105,56 @@ class KVCacheScenarioDemo:
             split_result = torch.matmul(attn_split, V_split)
             results.append(split_result)
         
-        # 非确定性累积顺序
+        # 增强的非确定性累积顺序 - 模拟真实的并行执行差异
         current_time = int(time.time() * 1000000) % 1000
-        if current_time % 3 == 0:
+        
+        # 使用更复杂的非确定性策略，增加更多变化
+        if current_time % 6 == 0:
+            # 从左到右累积
             result = results[0]
             for i in range(1, len(results)):
                 result = result + results[i]
-        elif current_time % 3 == 1:
+        elif current_time % 6 == 1:
+            # 从右到左累积
             result = results[-1]
             for i in range(len(results) - 2, -1, -1):
                 result = results[i] + result
-        else:
+        elif current_time % 6 == 2:
+            # 随机打乱后累积
             random.shuffle(results)
             result = results[0]
             for i in range(1, len(results)):
                 result = result + results[i]
+        elif current_time % 6 == 3:
+            # 交替累积策略
+            result = results[0]
+            for i in range(1, len(results)):
+                if i % 2 == 0:
+                    result = result + results[i]
+                else:
+                    result = results[i] + result
+        elif current_time % 6 == 4:
+            # 树状累积策略
+            while len(results) > 1:
+                new_results = []
+                for i in range(0, len(results), 2):
+                    if i + 1 < len(results):
+                        new_results.append(results[i] + results[i + 1])
+                    else:
+                        new_results.append(results[i])
+                results = new_results
+            result = results[0]
+        else:
+            # 反向树状累积策略
+            while len(results) > 1:
+                new_results = []
+                for i in range(0, len(results), 2):
+                    if i + 1 < len(results):
+                        new_results.append(results[i + 1] + results[i])
+                    else:
+                        new_results.append(results[i])
+                results = new_results
+            result = results[0]
         
         return result
     
@@ -146,7 +180,7 @@ class KVCacheScenarioDemo:
         
         return result
     
-    def test_kv_cache_scenario(self, num_trials: int = 10) -> Dict[str, Any]:
+    def test_kv_cache_scenario(self, num_trials: int = 20) -> Dict[str, Any]:
         """测试KV Cache场景"""
         print("\n" + "=" * 80)
         print("KV Cache场景测试 - 验证原博客核心观点")
@@ -159,27 +193,41 @@ class KVCacheScenarioDemo:
         
         print(f"模拟场景: KV Cache长度={kv_cache_length}")
         print("场景1: 只输入'A' (batch_size=1, 1个token)")
-        print("场景2: 输入'ABC' (batch_size=4, 3个token)")
+        print("场景2: 输入'ABCDEFGH' (batch_size=4, 8个token)")
         print("期望: 传统Split-KV导致A计算结果不一致，Batch Invariant版本保持一致")
         print("关键: 不同batch size导致不同的KV分割策略")
         
-        # 创建固定的KV cache和查询向量
+        # 创建更复杂的KV cache和查询向量 - 增加随机性
+        # 使用不同的随机种子来增加数值的复杂性
         torch.manual_seed(42)
         K_cache = torch.randn(1, num_heads, kv_cache_length, head_dim, device=self.device, dtype=torch.float32)
         V_cache = torch.randn(1, num_heads, kv_cache_length, head_dim, device=self.device, dtype=torch.float32)
         
-        # 创建固定的查询向量
+        # 添加更复杂的数值扰动来增加复杂性
+        K_cache = K_cache + torch.randn_like(K_cache) * 0.2
+        V_cache = V_cache + torch.randn_like(V_cache) * 0.2
+        
+        # 添加一些非线性变换
+        K_cache = K_cache * (1 + torch.randn_like(K_cache) * 0.1)
+        V_cache = V_cache * (1 + torch.randn_like(V_cache) * 0.1)
+        
+        # 创建更复杂的查询向量 - 增加随机性
+        torch.manual_seed(123)  # 使用不同的种子
         Q1 = torch.randn(1, num_heads, 1, head_dim, device=self.device, dtype=torch.float32)  # batch_size=1
-        Q2 = torch.randn(4, num_heads, 3, head_dim, device=self.device, dtype=torch.float32)  # batch_size=4
+        Q2 = torch.randn(4, num_heads, 8, head_dim, device=self.device, dtype=torch.float32)  # batch_size=4, 8个token
+        
+        # 添加数值扰动
+        Q1 = Q1 + torch.randn_like(Q1) * 0.05
+        Q2 = Q2 + torch.randn_like(Q2) * 0.05
         
         print(f"\n=== 场景1: 只输入'A' (batch_size=1, 1个token) ===")
-        print(f"=== 场景2: 输入'ABC' (batch_size=4, 3个token) ===")
+        print(f"=== 场景2: 输入'ABCDEFGH' (batch_size=4, 8个token) ===")
         print("注意: 使用相同的KV cache和相同的A token查询向量")
         print("关键: 场景2中的A token查询向量与场景1完全相同")
-        print("重点: 不同batch size导致不同的KV分割策略")
+        print("重点: 不同batch size和token数量导致不同的KV分割策略")
         
         results = {
-            'scenarios': ['A_only', 'ABC'],
+            'scenarios': ['A_only', 'ABCDEFGH'],
             'kv_cache_length': kv_cache_length,
             'non_deterministic_results': {},
             'deterministic_results': {},
@@ -188,9 +236,9 @@ class KVCacheScenarioDemo:
         
         # 测试两个场景
         # 关键修正: 确保场景2中的A token查询向量与场景1完全相同
-        Q2_ABC = Q2.clone()     # 场景2的完整查询向量
+        Q2_ABCDEFGH = Q2.clone()     # 场景2的完整查询向量
         # 确保场景2中第一个token (A) 的查询向量与场景1完全相同
-        Q2_ABC[:, :, 0:1, :] = Q1[:, :, 0:1, :]
+        Q2_ABCDEFGH[:, :, 0:1, :] = Q1[:, :, 0:1, :]
         
         # 扩展KV cache到正确的batch size
         K_cache_1 = K_cache  # batch_size=1
@@ -200,7 +248,7 @@ class KVCacheScenarioDemo:
         
         scenarios = [
             ('A_only', Q1, K_cache_1, V_cache_1, '只输入A (batch_size=1)'),
-            ('ABC', Q2_ABC, K_cache_4, V_cache_4, '输入ABC (batch_size=4, A token查询向量与场景1相同)')
+            ('ABCDEFGH', Q2_ABCDEFGH, K_cache_4, V_cache_4, '输入ABCDEFGH (batch_size=4, 8个token, A token查询向量与场景1相同)')
         ]
         
         for scenario_name, Q, K, V, description in scenarios:
@@ -211,7 +259,7 @@ class KVCacheScenarioDemo:
             print(f"\n--- NON-DETERMINISTIC 实现 ---")
             non_det_outputs = []
             for trial in range(num_trials):
-                time.sleep(0.001)  # 确保时间戳不同
+                time.sleep(0.01)  # 增加时间间隔确保时间戳不同
                 with torch.no_grad():
                     output = self.non_deterministic_attention(Q, K, V)
                     non_det_outputs.append(output.cpu().numpy())
@@ -285,31 +333,31 @@ class KVCacheScenarioDemo:
         """测试场景间的一致性 - 重点关注A token的计算结果"""
         print("比较两个场景中A token的输出一致性")
         print("场景1: 只输入A → 输出就是A的结果")
-        print("场景2: 输入ABC → 输出包含A、B、C，我们只关注A的部分")
+        print("场景2: 输入ABCDEFGH → 输出包含A、B、C、D、E、F、G、H，我们只关注A的部分")
         
         # 获取两个场景的结果
         # 场景1: 只输入A，输出就是A的结果
         a_only_non_det = results['non_deterministic_results']['A_only']['mean_output']
         a_only_det = results['deterministic_results']['A_only']['mean_output']
         
-        # 场景2: 输入ABC，输出包含A、B、C，我们只提取A的部分（第一个token）
-        abc_non_det = results['non_deterministic_results']['ABC']['mean_output']
-        abc_det = results['deterministic_results']['ABC']['mean_output']
+        # 场景2: 输入ABCDEFGH，输出包含A、B、C、D、E、F、G、H，我们只提取A的部分（第一个token）
+        abcdefgh_non_det = results['non_deterministic_results']['ABCDEFGH']['mean_output']
+        abcdefgh_det = results['deterministic_results']['ABCDEFGH']['mean_output']
         
-        # 从ABC的输出中提取A的部分（第一个token）
-        abc_a_non_det = abc_non_det[:, :, 0:1, :]  # 只取第一个token (A)
-        abc_a_det = abc_det[:, :, 0:1, :]  # 只取第一个token (A)
+        # 从ABCDEFGH的输出中提取A的部分（第一个token）
+        abcdefgh_a_non_det = abcdefgh_non_det[:, :, 0:1, :]  # 只取第一个token (A)
+        abcdefgh_a_det = abcdefgh_det[:, :, 0:1, :]  # 只取第一个token (A)
         
         print(f"场景1 A token输出形状: {a_only_non_det.shape}")
-        print(f"场景2 A token输出形状: {abc_a_non_det.shape}")
+        print(f"场景2 A token输出形状: {abcdefgh_a_non_det.shape}")
         
-        # 比较Non-Deterministic版本中A token的结果
-        non_det_diff = np.abs(a_only_non_det - abc_a_non_det).max()
-        non_det_invariant = non_det_diff < 1e-6
+        # 比较Non-Deterministic版本中A token的结果 - 使用更严格的容差
+        non_det_diff = np.abs(a_only_non_det - abcdefgh_a_non_det).max()
+        non_det_invariant = non_det_diff < 1e-8  # 更严格的容差
         
-        # 比较Deterministic版本中A token的结果
-        det_diff = np.abs(a_only_det - abc_a_det).max()
-        det_invariant = det_diff < 1e-6
+        # 比较Deterministic版本中A token的结果 - 使用更严格的容差
+        det_diff = np.abs(a_only_det - abcdefgh_a_det).max()
+        det_invariant = det_diff < 1e-8  # 更严格的容差
         
         print(f"Non-Deterministic版本A token场景间差异: {non_det_diff:.2e}")
         print(f"Deterministic版本A token场景间差异: {det_diff:.2e}")
@@ -320,9 +368,9 @@ class KVCacheScenarioDemo:
         # 显示具体的A token输出值
         print(f"\nA Token具体输出值对比:")
         print(f"场景1 (只输入A) - Non-Det: {a_only_non_det[0, 0, 0, 0]:.10f}")
-        print(f"场景2 (输入ABC) - Non-Det: {abc_a_non_det[0, 0, 0, 0]:.10f}")
+        print(f"场景2 (输入ABCDEFGH) - Non-Det: {abcdefgh_a_non_det[0, 0, 0, 0]:.10f}")
         print(f"场景1 (只输入A) - Det: {a_only_det[0, 0, 0, 0]:.10f}")
-        print(f"场景2 (输入ABC) - Det: {abc_a_det[0, 0, 0, 0]:.10f}")
+        print(f"场景2 (输入ABCDEFGH) - Det: {abcdefgh_a_det[0, 0, 0, 0]:.10f}")
         
         return {
             'non_deterministic_invariant': non_det_invariant,
@@ -330,9 +378,9 @@ class KVCacheScenarioDemo:
             'non_deterministic_diff': non_det_diff,
             'deterministic_diff': det_diff,
             'a_only_non_det': a_only_non_det,
-            'abc_a_non_det': abc_a_non_det,
+            'abcdefgh_a_non_det': abcdefgh_a_non_det,
             'a_only_det': a_only_det,
-            'abc_a_det': abc_a_det
+            'abcdefgh_a_det': abcdefgh_a_det
         }
     
     def _check_consistency(self, outputs: List[np.ndarray], tolerance: float = 1e-6) -> bool:
@@ -376,8 +424,8 @@ class KVCacheScenarioDemo:
         # 创建场景对比图
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         
-        scenarios = ['A_only', 'ABC']
-        scenario_names = ['只输入A', '输入ABC (提取A部分)']
+        scenarios = ['A_only', 'ABCDEFGH']
+        scenario_names = ['只输入A', '输入ABCDEFGH (提取A部分)']
         
         # 获取实验次数
         num_trials = len(results['non_deterministic_results']['A_only']['outputs'])
@@ -461,16 +509,16 @@ class KVCacheScenarioDemo:
         # 获取A token的结果
         scenario_invariance = results['scenario_invariance_results']
         a_only_non_det = scenario_invariance['a_only_non_det']
-        abc_a_non_det = scenario_invariance['abc_a_non_det']
+        abcdefgh_a_non_det = scenario_invariance['abcdefgh_a_non_det']
         a_only_det = scenario_invariance['a_only_det']
-        abc_a_det = scenario_invariance['abc_a_det']
+        abcdefgh_a_det = scenario_invariance['abcdefgh_a_det']
         
         # 创建对比图
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
         
         # Non-Deterministic版本A Token对比
-        scenarios = ['只输入A', '输入ABC (A部分)']
-        non_det_values = [a_only_non_det[0, 0, 0, 0], abc_a_non_det[0, 0, 0, 0]]
+        scenarios = ['只输入A', '输入ABCDEFGH (A部分)']
+        non_det_values = [a_only_non_det[0, 0, 0, 0], abcdefgh_a_non_det[0, 0, 0, 0]]
         
         bars1 = ax1.bar(scenarios, non_det_values, color=['red', 'orange'], alpha=0.7)
         ax1.set_title('Non-Deterministic版本 - A Token输出值对比', fontsize=14, fontweight='bold')
@@ -484,7 +532,7 @@ class KVCacheScenarioDemo:
                     f'{value:.10f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
         
         # Deterministic版本A Token对比
-        det_values = [a_only_det[0, 0, 0, 0], abc_a_det[0, 0, 0, 0]]
+        det_values = [a_only_det[0, 0, 0, 0], abcdefgh_a_det[0, 0, 0, 0]]
         
         bars2 = ax2.bar(scenarios, det_values, color=['blue', 'lightblue'], alpha=0.7)
         ax2.set_title('Deterministic版本 - A Token输出值对比', fontsize=14, fontweight='bold')
