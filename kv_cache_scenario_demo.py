@@ -49,17 +49,19 @@ class KVCacheScenarioDemo:
         
         print(f"  Batch Size: {batch_size}, KV Length: {kv_len}")
         
-        # 动态分割策略基于batch size
+        # Split-KV策略: 根据batch size动态调整分割策略
         if batch_size < self.parallel_degree:
+            # 当batch size < 并行度时，使用更细的分割
             num_splits = self.parallel_degree
             split_size = kv_len // num_splits
             if split_size == 0: split_size = 1
-            print(f"  Split Strategy: {num_splits} splits, each ~{split_size} elements")
+            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (细分割)")
         else:
+            # 当batch size >= 并行度时，使用更粗的分割
             num_splits = max(1, self.parallel_degree // batch_size)
             split_size = kv_len // num_splits
             if split_size == 0: split_size = 1
-            print(f"  Split Strategy: {num_splits} splits, each ~{split_size} elements")
+            print(f"  Split-KV Strategy: {num_splits} splits, each ~{split_size} elements (粗分割)")
         
         # 计算attention scores
         attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / np.sqrt(head_dim)
@@ -156,9 +158,10 @@ class KVCacheScenarioDemo:
         num_heads = 8
         
         print(f"模拟场景: KV Cache长度={kv_cache_length}")
-        print("场景1: 只输入'A' (1个token)")
-        print("场景2: 输入'ABC' (3个token)")
+        print("场景1: 只输入'A' (batch_size=1, 1个token)")
+        print("场景2: 输入'ABC' (batch_size=4, 3个token)")
         print("期望: 传统Split-KV导致A计算结果不一致，Batch Invariant版本保持一致")
+        print("关键: 不同batch size导致不同的KV分割策略")
         
         # 创建固定的KV cache和查询向量
         torch.manual_seed(42)
@@ -166,13 +169,14 @@ class KVCacheScenarioDemo:
         V_cache = torch.randn(1, num_heads, kv_cache_length, head_dim, device=self.device, dtype=torch.float32)
         
         # 创建固定的查询向量
-        Q1 = torch.randn(1, num_heads, 1, head_dim, device=self.device, dtype=torch.float32)
-        Q2 = torch.randn(1, num_heads, 3, head_dim, device=self.device, dtype=torch.float32)
+        Q1 = torch.randn(1, num_heads, 1, head_dim, device=self.device, dtype=torch.float32)  # batch_size=1
+        Q2 = torch.randn(4, num_heads, 3, head_dim, device=self.device, dtype=torch.float32)  # batch_size=4
         
-        print(f"\n=== 场景1: 只输入'A' (1个token) ===")
-        print(f"=== 场景2: 输入'ABC' (3个token) ===")
+        print(f"\n=== 场景1: 只输入'A' (batch_size=1, 1个token) ===")
+        print(f"=== 场景2: 输入'ABC' (batch_size=4, 3个token) ===")
         print("注意: 使用相同的KV cache和相同的A token查询向量")
         print("关键: 场景2中的A token查询向量与场景1完全相同")
+        print("重点: 不同batch size导致不同的KV分割策略")
         
         results = {
             'scenarios': ['A_only', 'ABC'],
@@ -188,14 +192,20 @@ class KVCacheScenarioDemo:
         # 确保场景2中第一个token (A) 的查询向量与场景1完全相同
         Q2_ABC[:, :, 0:1, :] = Q1[:, :, 0:1, :]
         
+        # 扩展KV cache到正确的batch size
+        K_cache_1 = K_cache  # batch_size=1
+        V_cache_1 = V_cache  # batch_size=1
+        K_cache_4 = K_cache.repeat(4, 1, 1, 1)  # batch_size=4
+        V_cache_4 = V_cache.repeat(4, 1, 1, 1)  # batch_size=4
+        
         scenarios = [
-            ('A_only', Q1, '只输入A'),
-            ('ABC', Q2_ABC, '输入ABC (A token查询向量与场景1相同)')
+            ('A_only', Q1, K_cache_1, V_cache_1, '只输入A (batch_size=1)'),
+            ('ABC', Q2_ABC, K_cache_4, V_cache_4, '输入ABC (batch_size=4, A token查询向量与场景1相同)')
         ]
         
-        for scenario_name, Q, description in scenarios:
+        for scenario_name, Q, K, V, description in scenarios:
             print(f"\n--- 测试场景: {description} ---")
-            print(f"输入形状: Q={Q.shape}, K={K_cache.shape}, V={V_cache.shape}")
+            print(f"输入形状: Q={Q.shape}, K={K.shape}, V={V.shape}")
             
             # 测试Non-Deterministic版本
             print(f"\n--- NON-DETERMINISTIC 实现 ---")
@@ -203,7 +213,7 @@ class KVCacheScenarioDemo:
             for trial in range(num_trials):
                 time.sleep(0.001)  # 确保时间戳不同
                 with torch.no_grad():
-                    output = self.non_deterministic_attention(Q, K_cache, V_cache)
+                    output = self.non_deterministic_attention(Q, K, V)
                     non_det_outputs.append(output.cpu().numpy())
             
             # 检查Non-Deterministic的一致性
@@ -233,7 +243,7 @@ class KVCacheScenarioDemo:
                     torch.mps.manual_seed(42)
                 
                 with torch.no_grad():
-                    output = self.deterministic_attention(Q, K_cache, V_cache)
+                    output = self.deterministic_attention(Q, K, V)
                     det_outputs.append(output.cpu().numpy())
             
             # 检查Deterministic的一致性
